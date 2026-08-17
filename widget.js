@@ -11,10 +11,19 @@
 // ─────────────────────────────────────────────
 
 const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
-const CACHE_VERSION = 9;          // 改這個數字會強制清快取
+const CACHE_VERSION = 10;         // 改這個數字會強制清快取
 const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資訊
 const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
                                   // "fit"  = 完整顯示整張卡片，四周留底色
+
+// 渲染路徑：兩條路在 WidgetKit 裡的壓縮行為不同，糊的話就換另一個試
+//   "image"      = widget.addImage()（預設，繞過背景圖壓縮）
+//   "background" = widget.backgroundImage（舊路徑）
+const RENDER_MODE = "image";
+
+// 過取樣倍率。1 = 剛好等於螢幕像素。若仍糊可試 1.5 或 2，
+// 讓 WidgetKit 壓縮時有更多資料可用（代價是記憶體與檔案變大）。
+const OVERSAMPLE = 1;
 
 const fm = FileManager.local();
 const dir = fm.joinPath(fm.documentsDirectory(), "wisdom");
@@ -80,8 +89,8 @@ function widgetPointSize() {
 //  產生的回報點數），所以不要靠它推論。這裡直接把畫布開成目標像素數，
 //  產出的圖必然是 1014x1062 這種實際解析度，iOS 放進 338x354pt@3x 剛好 1:1。
 function renderExact(src, box, scaleFactor) {
-  const pw = Math.round(box.width * scaleFactor);
-  const ph = Math.round(box.height * scaleFactor);
+  const pw = Math.round(box.width * scaleFactor * OVERSAMPLE);
+  const ph = Math.round(box.height * scaleFactor * OVERSAMPLE);
 
   const ctx = new DrawContext();
   ctx.size = new Size(pw, ph);
@@ -156,7 +165,16 @@ if (image) {
     log(`🖼  實際輸出 ${back.size.width}x${back.size.height} px  ← 必須等於上一行的 px`);
     fm.remove(probe);
   }
-  widget.backgroundImage = rendered;
+  if (RENDER_MODE === "background") {
+    widget.backgroundImage = rendered;
+  } else {
+    // addImage 路徑：imageSize 要用「點數」，圖本身是高解析度 → 顯示時 1:1
+    const wi = widget.addImage(rendered);
+    wi.imageSize = new Size(box.width, box.height);
+    wi.applyFillingContentMode();
+    wi.centerAlignImage();
+  }
+  log(`🎨 渲染路徑 = ${RENDER_MODE}，過取樣 = ${OVERSAMPLE}x`);
 } else {
   widget.backgroundColor = new Color("#1c1c1e");
   const t = widget.addText("暫時連不上網路 🌙");
