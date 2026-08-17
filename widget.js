@@ -11,8 +11,10 @@
 // ─────────────────────────────────────────────
 
 const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
-const CACHE_VERSION = 7;          // 改這個數字會強制清快取
+const CACHE_VERSION = 8;          // 改這個數字會強制清快取
 const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資訊
+const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
+                                  // "fit"  = 完整顯示整張卡片，四周留底色
 
 const fm = FileManager.local();
 const dir = fm.joinPath(fm.documentsDirectory(), "wisdom");
@@ -55,36 +57,39 @@ async function get(url, kind) {
 }
 
 // ── widget 實際點數尺寸（依機型與家族）────────────────────
+//  重要：Large widget 不是正方形！它的「寬度與 Medium 相同」，只有高度較高。
+//  例：390pt 螢幕 → small 158x158 / medium 338x158 / large 338x354
+//  若這裡算錯，iOS 會為了塞進實際尺寸再縮放一次 → 桌面上就糊掉。
 function widgetPointSize() {
   const family = config.widgetFamily || "large";
   const scr = Device.screenSize();
   const w = Math.min(scr.width, scr.height);
-  // 依螢幕寬度分級，取常見機型的 widget 尺寸
-  let small, medium, large;
-  if (w >= 428)      { small = 170; medium = 364; large = 382; }
-  else if (w >= 414) { small = 169; medium = 360; large = 379; }
-  else if (w >= 390) { small = 158; medium = 338; large = 354; }
-  else if (w >= 375) { small = 155; medium = 329; large = 345; }
-  else               { small = 141; medium = 292; large = 311; }
-  if (family === "small")  return new Size(small, small);
-  if (family === "medium") return new Size(medium, small);
-  return new Size(large, large);   // large / extraLarge 皆以 large 處理
+  let sq, wide, tall;                       // sq=小方形邊長, wide=中/大寬度, tall=大高度
+  if (w >= 428)      { sq = 170; wide = 364; tall = 382; }
+  else if (w >= 414) { sq = 169; wide = 360; tall = 379; }
+  else if (w >= 390) { sq = 158; wide = 338; tall = 354; }
+  else if (w >= 375) { sq = 155; wide = 329; tall = 345; }
+  else               { sq = 141; wide = 292; tall = 311; }
+  if (family === "small")  return new Size(sq,   sq);
+  if (family === "medium") return new Size(wide, sq);
+  return new Size(wide, tall);              // large / extraLarge
 }
 
-// ── 以裝置實際像素渲染：等比填滿並置中裁切，不做任何放大 ──
+// ── 以裝置實際像素渲染，讓 WidgetKit 完全不必再縮放 ──────
 function renderExact(src, box) {
   const ctx = new DrawContext();
   ctx.size = box;
   ctx.respectScreenScale = true;   // 關鍵：實際輸出 = 點數 x 螢幕倍率
   ctx.opaque = true;
+  ctx.setFillColor(new Color("#f7f4ef"));          // 卡片底色，fit 模式的留白
+  ctx.fillRect(new Rect(0, 0, box.width, box.height));
 
   const sw = src.size.width, sh = src.size.height;
-  const scale = Math.max(box.width / sw, box.height / sh);   // aspect fill
+  const scale = FILL_MODE === "fit"
+    ? Math.min(box.width / sw, box.height / sh)     // 完整顯示
+    : Math.max(box.width / sw, box.height / sh);    // 填滿裁切
   const dw = sw * scale, dh = sh * scale;
-  const dx = (box.width - dw) / 2;
-  const dy = (box.height - dh) / 2;
-
-  ctx.drawImageInRect(src, new Rect(dx, dy, dw, dh));
+  ctx.drawImageInRect(src, new Rect((box.width - dw) / 2, (box.height - dh) / 2, dw, dh));
   return ctx.getImage();
 }
 
@@ -136,7 +141,9 @@ if (image) {
       ? "✅ 來源大於需求 → 縮小顯示（清晰）"
       : "⚠️ 來源小於需求 → 會被放大（模糊）");
 
-  widget.backgroundImage = renderExact(image, box);
+  const rendered = renderExact(image, box);
+  log(`🖼  實際輸出 ${rendered.size.width}x${rendered.size.height} px（應等於上面的 px 值）`);
+  widget.backgroundImage = rendered;
 } else {
   widget.backgroundColor = new Color("#1c1c1e");
   const t = widget.addText("暫時連不上網路 🌙");
