@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────
 
 const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
-const CACHE_VERSION = 8;          // 改這個數字會強制清快取
+const CACHE_VERSION = 9;          // 改這個數字會強制清快取
 const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資訊
 const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
                                   // "fit"  = 完整顯示整張卡片，四周留底色
@@ -75,21 +75,27 @@ function widgetPointSize() {
   return new Size(wide, tall);              // large / extraLarge
 }
 
-// ── 以裝置實際像素渲染，讓 WidgetKit 完全不必再縮放 ──────
-function renderExact(src, box) {
+// ── 直接以「像素」建立畫布，不依賴 respectScreenScale ──────
+//  Scriptable 的 Image.size 單位不一致（載入的圖回報像素、DrawContext
+//  產生的回報點數），所以不要靠它推論。這裡直接把畫布開成目標像素數，
+//  產出的圖必然是 1014x1062 這種實際解析度，iOS 放進 338x354pt@3x 剛好 1:1。
+function renderExact(src, box, scaleFactor) {
+  const pw = Math.round(box.width * scaleFactor);
+  const ph = Math.round(box.height * scaleFactor);
+
   const ctx = new DrawContext();
-  ctx.size = box;
-  ctx.respectScreenScale = true;   // 關鍵：實際輸出 = 點數 x 螢幕倍率
+  ctx.size = new Size(pw, ph);
+  ctx.respectScreenScale = false;   // 自己算像素，不讓它再乘一次
   ctx.opaque = true;
-  ctx.setFillColor(new Color("#f7f4ef"));          // 卡片底色，fit 模式的留白
-  ctx.fillRect(new Rect(0, 0, box.width, box.height));
+  ctx.setFillColor(new Color("#f7f4ef"));
+  ctx.fillRect(new Rect(0, 0, pw, ph));
 
   const sw = src.size.width, sh = src.size.height;
   const scale = FILL_MODE === "fit"
-    ? Math.min(box.width / sw, box.height / sh)     // 完整顯示
-    : Math.max(box.width / sw, box.height / sh);    // 填滿裁切
+    ? Math.min(pw / sw, ph / sh)      // 完整顯示
+    : Math.max(pw / sw, ph / sh);     // 填滿裁切
   const dw = sw * scale, dh = sh * scale;
-  ctx.drawImageInRect(src, new Rect((box.width - dw) / 2, (box.height - dh) / 2, dw, dh));
+  ctx.drawImageInRect(src, new Rect((pw - dw) / 2, (ph - dh) / 2, dw, dh));
   return ctx.getImage();
 }
 
@@ -141,8 +147,15 @@ if (image) {
       ? "✅ 來源大於需求 → 縮小顯示（清晰）"
       : "⚠️ 來源小於需求 → 會被放大（模糊）");
 
-  const rendered = renderExact(image, box);
-  log(`🖼  實際輸出 ${rendered.size.width}x${rendered.size.height} px（應等於上面的 px 值）`);
+  const rendered = renderExact(image, box, scaleFactor);
+  // 可靠的驗證：寫入檔案再讀回來，讀回來的尺寸必定是「像素」
+  if (DEBUG) {
+    const probe = fm.joinPath(dir, "_probe.png");
+    fm.writeImage(probe, rendered);
+    const back = fm.readImage(probe);
+    log(`🖼  實際輸出 ${back.size.width}x${back.size.height} px  ← 必須等於上一行的 px`);
+    fm.remove(probe);
+  }
   widget.backgroundImage = rendered;
 } else {
   widget.backgroundColor = new Color("#1c1c1e");
