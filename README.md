@@ -7,6 +7,19 @@
 - 圖片存在雲端，手機只在換日時抓一次，**平常不耗網路、不耗電**
 - 完全免費，沒有廣告、不需註冊、不收集任何個人資料
 
+## 📷 實際效果
+
+<table>
+<tr>
+<td align="center" width="50%"><b>Android</b></td>
+<td align="center" width="50%"><b>iPhone</b></td>
+</tr>
+<tr>
+<td><img src="https://wyattsheu.github.io/wisdom-assets/screenshots/android.png" width="100%"></td>
+<td><img src="https://wyattsheu.github.io/wisdom-assets/screenshots/ios.png" width="100%"></td>
+</tr>
+</table>
+
 ---
 
 ## 📱 iPhone / iPad 安裝
