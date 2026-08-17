@@ -16,10 +16,10 @@ const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資�
 const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
                                   // "fit"  = 完整顯示整張卡片，四周留底色
 
-// 渲染路徑：兩條路在 WidgetKit 裡的壓縮行為不同，糊的話就換另一個試
-//   "image"      = widget.addImage()（預設，繞過背景圖壓縮）
-//   "background" = widget.backgroundImage（舊路徑）
-const RENDER_MODE = "image";
+// 渲染路徑：
+//   "background" = 鋪滿整個 widget 外框（預設）
+//   "image"      = widget.addImage()，會受 iOS 17+ 內容邊界限制 → 四周出現黑邊
+const RENDER_MODE = "background";
 
 // 過取樣倍率。1 = 剛好等於螢幕像素。widget 有記憶體上限，別調太高。
 const OVERSAMPLE = 1;
@@ -34,9 +34,6 @@ const FOCUS_Y = 0.5;
 // 在小工具上直接印出實際解析度（widget 執行時看不到 console，只能畫在圖上）
 // 確認畫質正常後改成 false 即可移除。
 const SHOW_OVERLAY = false;
-
-// 卡片底色。widget 底色也用它 → 即使邊緣有一兩點誤差也看不出接縫
-const CARD_BG = "#f7f4ef";
 
 const fm = FileManager.local();
 const dir = fm.joinPath(fm.documentsDirectory(), "wisdom");
@@ -118,7 +115,7 @@ function renderExact(src, box, scaleFactor) {
   ctx.size = new Size(pw, ph);
   ctx.respectScreenScale = false;   // 自己算像素，不讓它再乘一次
   ctx.opaque = true;
-  ctx.setFillColor(new Color(CARD_BG));
+  ctx.setFillColor(new Color("#f7f4ef"));
   ctx.fillRect(new Rect(0, 0, pw, ph));
 
   const sw = src.size.width, sh = src.size.height;
@@ -150,8 +147,7 @@ function renderExact(src, box, scaleFactor) {
 
 const widget = new ListWidget();
 widget.setPadding(0, 0, 0, 0);
-// 沒有這行，圖片沒鋪滿的地方會露出 ListWidget 的深色預設背景 → 黑邊
-widget.backgroundColor = new Color(CARD_BG);
+widget.backgroundColor = new Color("#f7f4ef");   // 縫隙用卡片底色，不要露出黑底
 let image = null, offline = false;
 
 try {
@@ -225,8 +221,7 @@ if (image) {
   } else {
     // addImage 路徑：imageSize 要用「點數」，圖本身是高解析度 → 顯示時 1:1
     const wi = widget.addImage(rendered);
-    // 略為放大以吃掉尺寸表與實機的誤差，多出來的部分會被裁掉，不會留縫
-    wi.imageSize = new Size(box.width + 6, box.height + 6);
+    wi.imageSize = new Size(box.width, box.height);
     wi.applyFillingContentMode();
     wi.centerAlignImage();
   }
