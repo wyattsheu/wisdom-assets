@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────
 
 const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
-const CACHE_VERSION = 11;         // 改這個數字會強制清快取
+const CACHE_VERSION = 12;         // 改這個數字會強制清快取
 const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資訊
 const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
                                   // "fit"  = 完整顯示整張卡片，四周留底色
@@ -24,9 +24,17 @@ const RENDER_MODE = "image";
 // 過取樣倍率。1 = 剛好等於螢幕像素。widget 有記憶體上限，別調太高。
 const OVERSAMPLE = 1;
 
+// 取景（決定文字看起來多大，這是「桌面上清不清楚」的關鍵）
+//   ZOOM   1.0 = 剛好填滿；放大數字會裁掉更多留白、文字變大
+//          建議先試 1.25 → 1.4 → 1.6，看哪個順眼
+//   FOCUS_Y 垂直對焦位置 0=最上 0.5=正中 1=最下
+//          卡片上半是標題、中間是內文，取 0.42 可同時容納兩者
+const ZOOM = 1.3;
+const FOCUS_Y = 0.42;
+
 // 在小工具上直接印出實際解析度（widget 執行時看不到 console，只能畫在圖上）
 // 確認畫質正常後改成 false 即可移除。
-const SHOW_OVERLAY = true;
+const SHOW_OVERLAY = false;
 
 const fm = FileManager.local();
 const dir = fm.joinPath(fm.documentsDirectory(), "wisdom");
@@ -112,11 +120,19 @@ function renderExact(src, box, scaleFactor) {
   ctx.fillRect(new Rect(0, 0, pw, ph));
 
   const sw = src.size.width, sh = src.size.height;
-  const scale = FILL_MODE === "fit"
+  const base = FILL_MODE === "fit"
     ? Math.min(pw / sw, ph / sh)      // 完整顯示
     : Math.max(pw / sw, ph / sh);     // 填滿裁切
+  const scale = base * (FILL_MODE === "fit" ? 1 : ZOOM);
   const dw = sw * scale, dh = sh * scale;
-  ctx.drawImageInRect(src, new Rect((pw - dw) / 2, (ph - dh) / 2, dw, dh));
+
+  // 水平置中；垂直依 FOCUS_Y 對焦，並夾住避免露出畫布外的底色
+  const dx = (pw - dw) / 2;
+  let dy = (ph / 2) - (dh * FOCUS_Y);
+  if (dh >= ph) dy = Math.min(0, Math.max(ph - dh, dy));
+  else dy = (ph - dh) / 2;
+
+  ctx.drawImageInRect(src, new Rect(dx, dy, dw, dh));
 
   // widget 執行時看不到 console，把實際解析度直接畫在圖上
   if (SHOW_OVERLAY) {
