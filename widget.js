@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────
 
 const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
-const CACHE_VERSION = 12;         // 改這個數字會強制清快取
+const CACHE_VERSION = 14;         // 改這個數字會強制清快取
 const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資訊
 const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
                                   // "fit"  = 完整顯示整張卡片，四周留底色
@@ -25,16 +25,18 @@ const RENDER_MODE = "image";
 const OVERSAMPLE = 1;
 
 // 取景（決定文字看起來多大，這是「桌面上清不清楚」的關鍵）
-//   ZOOM   1.0 = 剛好填滿；放大數字會裁掉更多留白、文字變大
-//          建議先試 1.25 → 1.4 → 1.6，看哪個順眼
-//   FOCUS_Y 垂直對焦位置 0=最上 0.5=正中 1=最下
-//          卡片上半是標題、中間是內文，取 0.42 可同時容納兩者
-const ZOOM = 1.3;
-const FOCUS_Y = 0.42;
+//   預設 1.0 / 0.5 = 等比填滿並置中（與 v10 相同，實測最耐看）
+//   ZOOM    想讓文字更大可調 1.2~1.5，代價是裁掉更多卡片內容
+//   FOCUS_Y 垂直對焦 0=最上 0.5=正中 1=最下
+const ZOOM = 1.15;
+const FOCUS_Y = 0.5;
 
 // 在小工具上直接印出實際解析度（widget 執行時看不到 console，只能畫在圖上）
 // 確認畫質正常後改成 false 即可移除。
 const SHOW_OVERLAY = false;
+
+// 卡片底色。widget 底色也用它 → 即使邊緣有一兩點誤差也看不出接縫
+const CARD_BG = "#f7f4ef";
 
 const fm = FileManager.local();
 const dir = fm.joinPath(fm.documentsDirectory(), "wisdom");
@@ -116,7 +118,7 @@ function renderExact(src, box, scaleFactor) {
   ctx.size = new Size(pw, ph);
   ctx.respectScreenScale = false;   // 自己算像素，不讓它再乘一次
   ctx.opaque = true;
-  ctx.setFillColor(new Color("#f7f4ef"));
+  ctx.setFillColor(new Color(CARD_BG));
   ctx.fillRect(new Rect(0, 0, pw, ph));
 
   const sw = src.size.width, sh = src.size.height;
@@ -148,6 +150,8 @@ function renderExact(src, box, scaleFactor) {
 
 const widget = new ListWidget();
 widget.setPadding(0, 0, 0, 0);
+// 沒有這行，圖片沒鋪滿的地方會露出 ListWidget 的深色預設背景 → 黑邊
+widget.backgroundColor = new Color(CARD_BG);
 let image = null, offline = false;
 
 try {
@@ -221,7 +225,8 @@ if (image) {
   } else {
     // addImage 路徑：imageSize 要用「點數」，圖本身是高解析度 → 顯示時 1:1
     const wi = widget.addImage(rendered);
-    wi.imageSize = new Size(box.width, box.height);
+    // 略為放大以吃掉尺寸表與實機的誤差，多出來的部分會被裁掉，不會留縫
+    wi.imageSize = new Size(box.width + 6, box.height + 6);
     wi.applyFillingContentMode();
     wi.centerAlignImage();
   }
