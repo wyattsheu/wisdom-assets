@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────
-// 每日智慧小語 Widget v7
+// 每日智慧小語 Widget v11
 //
 // v7 相對 v6 的兩個關鍵修正：
 //  1. 用 DrawContext 以「裝置實際像素」渲染，讓 WidgetKit 不必再縮放
@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────
 
 const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
-const CACHE_VERSION = 10;         // 改這個數字會強制清快取
+const CACHE_VERSION = 11;         // 改這個數字會強制清快取
 const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資訊
 const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
                                   // "fit"  = 完整顯示整張卡片，四周留底色
@@ -21,9 +21,12 @@ const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，�
 //   "background" = widget.backgroundImage（舊路徑）
 const RENDER_MODE = "image";
 
-// 過取樣倍率。1 = 剛好等於螢幕像素。若仍糊可試 1.5 或 2，
-// 讓 WidgetKit 壓縮時有更多資料可用（代價是記憶體與檔案變大）。
+// 過取樣倍率。1 = 剛好等於螢幕像素。widget 有記憶體上限，別調太高。
 const OVERSAMPLE = 1;
+
+// 在小工具上直接印出實際解析度（widget 執行時看不到 console，只能畫在圖上）
+// 確認畫質正常後改成 false 即可移除。
+const SHOW_OVERLAY = true;
 
 const fm = FileManager.local();
 const dir = fm.joinPath(fm.documentsDirectory(), "wisdom");
@@ -50,12 +53,16 @@ if (meta.v !== CACHE_VERSION) {
   meta = {};
 }
 
+// ⚠️ 關鍵：Request.loadImage() 在 widget 環境會被砍到最大 500x500px，
+//    在 App 內卻是完整解析度 —— 這就是「App 內清晰、桌面糊」的真正原因。
+//    繞法：一律以原始位元組 (Data) 下載／讀檔，再用 Image.fromData() 還原，
+//    完全不碰 loadImage() / readImage()。
 async function get(url, kind) {
   for (let i = 0; i < 3; i++) {
     try {
       const r = new Request(url);
       r.timeoutInterval = 12;
-      if (kind === "image") return await r.loadImage();
+      if (kind === "image") return Image.fromData(await r.load());   // 不用 loadImage
       if (kind === "json")  return await r.loadJSON();
       return await r.loadString();
     } catch (e) {
@@ -63,6 +70,11 @@ async function get(url, kind) {
       await new Promise(res => Timer.schedule(900, false, res));
     }
   }
+}
+
+/** 以原始位元組讀檔還原圖片，避開 readImage() 可能的降階 */
+function readImageRaw(path) {
+  return Image.fromData(Data.fromFile(path));
 }
 
 // ── widget 實際點數尺寸（依機型與家族）────────────────────
@@ -105,6 +117,16 @@ function renderExact(src, box, scaleFactor) {
     : Math.max(pw / sw, ph / sh);     // 填滿裁切
   const dw = sw * scale, dh = sh * scale;
   ctx.drawImageInRect(src, new Rect((pw - dw) / 2, (ph - dh) / 2, dw, dh));
+
+  // widget 執行時看不到 console，把實際解析度直接畫在圖上
+  if (SHOW_OVERLAY) {
+    const label = `src ${sw}x${sh} → out ${pw}x${ph}`;
+    ctx.setFillColor(new Color("#000000", 0.65));
+    ctx.fillRect(new Rect(0, ph - 34, pw, 34));
+    ctx.setTextColor(Color.white());
+    ctx.setFont(Font.mediumSystemFont(20));
+    ctx.drawText(label, new Point(10, ph - 29));
+  }
   return ctx.getImage();
 }
 
@@ -114,7 +136,7 @@ let image = null, offline = false;
 
 try {
   if (meta.date === today && fm.fileExists(imgPath)) {
-    image = fm.readImage(imgPath);
+    image = readImageRaw(imgPath);
     log(`📦 使用今日快取：${meta.title || ""}`);
   } else {
     let man = null;
@@ -136,15 +158,28 @@ try {
     if (!items.length) throw new Error("manifest 是空的");
     const pick = items[Math.floor(Math.random() * items.length)];
 
-    image = await get(man.base + pick.id + ".webp", "image");
-    fm.writeImage(imgPath, image);
-    fm.writeImage(lastPath, image);
+    // 存「原始 webp 位元組」而不是用 writeImage()（那會重新編碼，且可能已降階）
+    const raw = await (async () => {
+      for (let i = 0; i < 3; i++) {
+        try {
+          const r = new Request(man.base + pick.id + ".webp");
+          r.timeoutInterval = 12;
+          return await r.load();
+        } catch (e) {
+          if (i === 2) throw e;
+          await new Promise(res => Timer.schedule(900, false, res));
+        }
+      }
+    })();
+    fm.write(imgPath, raw);
+    fm.write(lastPath, raw);
+    image = Image.fromData(raw);
     fm.writeString(metaPath, JSON.stringify({ v: CACHE_VERSION, date: today, id: pick.id, title: pick.title }));
     log(`⬇️  下載：${pick.title}`);
   }
 } catch (err) {
   console.error(err);
-  if (fm.fileExists(lastPath)) { image = fm.readImage(lastPath); offline = true; }
+  if (fm.fileExists(lastPath)) { image = readImageRaw(lastPath); offline = true; }
 }
 
 if (image) {
