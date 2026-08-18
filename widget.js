@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────
 
 const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
-const CACHE_VERSION = 14;         // 改這個數字會強制清快取
+const CACHE_VERSION = 15;         // 改這個數字會強制清快取
 const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資訊
 const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
                                   // "fit"  = 完整顯示整張卡片，四周留底色
@@ -20,6 +20,14 @@ const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，�
 //   "background" = 鋪滿整個 widget 外框（預設）
 //   "image"      = widget.addImage()，會受 iOS 17+ 內容邊界限制 → 四周出現黑邊
 const RENDER_MODE = "background";
+
+// 縮放策略 —— 這是目前畫質的最後一個變因
+//   "crop"  DrawContext 只裁切、完全不縮放（1:1 取出原始像素），
+//           縮放交給 iOS 自己做。全程只經過「一次」重採樣。（預設）
+//   "scale" 我們自己用 DrawContext 縮到 widget 像素，iOS 再貼上。
+//           理論上 1:1，但等於用 DrawContext 的重採樣品質取代 iOS 的。
+// 兩種都試試看哪個在你的機型上比較清楚。
+const RESAMPLE = "crop";
 
 // 過取樣倍率。1 = 剛好等於螢幕像素。widget 有記憶體上限，別調太高。
 const OVERSAMPLE = 1;
@@ -107,6 +115,38 @@ function widgetPointSize() {
 //  Scriptable 的 Image.size 單位不一致（載入的圖回報像素、DrawContext
 //  產生的回報點數），所以不要靠它推論。這裡直接把畫布開成目標像素數，
 //  產出的圖必然是 1014x1062 這種實際解析度，iOS 放進 338x354pt@3x 剛好 1:1。
+/**
+ * 只裁切、不縮放：以「原始像素」取出要顯示的區域，縮放交給 iOS。
+ * 這樣整條路徑只經過一次重採樣（iOS 那次），而不是我們縮一次、iOS 再處理一次。
+ */
+function renderCropOnly(src, box) {
+  const sw = src.size.width, sh = src.size.height;
+  const targetAspect = box.width / box.height;
+
+  // 先算出「填滿 widget 後實際看得到的來源區域」有多大（以來源像素為單位）
+  let cropW, cropH;
+  if (sw / sh > targetAspect) {
+    cropH = sh / ZOOM;
+    cropW = cropH * targetAspect;
+  } else {
+    cropW = sw / ZOOM;
+    cropH = cropW / targetAspect;
+  }
+  cropW = Math.min(Math.round(cropW), sw);
+  cropH = Math.min(Math.round(cropH), sh);
+
+  const ctx = new DrawContext();
+  ctx.size = new Size(cropW, cropH);
+  ctx.respectScreenScale = false;
+  ctx.opaque = true;
+
+  // 把原圖以 1:1 原尺寸畫進去，只是位移到想要的裁切位置 → 沒有任何縮放
+  const dx = -(sw - cropW) / 2;
+  const dy = -((sh - cropH) * FOCUS_Y);
+  ctx.drawImageInRect(src, new Rect(dx, dy, sw, sh));
+  return ctx.getImage();
+}
+
 function renderExact(src, box, scaleFactor) {
   const pw = Math.round(box.width * scaleFactor * OVERSAMPLE);
   const ph = Math.round(box.height * scaleFactor * OVERSAMPLE);
@@ -133,7 +173,7 @@ function renderExact(src, box, scaleFactor) {
 
   ctx.drawImageInRect(src, new Rect(dx, dy, dw, dh));
 
-  // widget 執行時看不到 console，把實際解析度直接畫在圖上
+  // widget 執行時看不到 console，把實際解析度直接畫在圖上（暫時保留）
   if (SHOW_OVERLAY) {
     const label = `src ${sw}x${sh} → out ${pw}x${ph}`;
     ctx.setFillColor(new Color("#000000", 0.65));
@@ -207,13 +247,18 @@ if (image) {
       ? "✅ 來源大於需求 → 縮小顯示（清晰）"
       : "⚠️ 來源小於需求 → 會被放大（模糊）");
 
-  const rendered = renderExact(image, box, scaleFactor);
-  // 可靠的驗證：寫入檔案再讀回來，讀回來的尺寸必定是「像素」
+  const rendered = RESAMPLE === "crop"
+    ? renderCropOnly(image, box)                    // 只裁切，縮放交給 iOS
+    : renderExact(image, box, scaleFactor);         // 自己縮到 widget 像素
+
   if (DEBUG) {
     const probe = fm.joinPath(dir, "_probe.png");
     fm.writeImage(probe, rendered);
     const back = fm.readImage(probe);
-    log(`🖼  實際輸出 ${back.size.width}x${back.size.height} px  ← 必須等於上一行的 px`);
+    log(`🖼  輸出 ${back.size.width}x${back.size.height} px  (RESAMPLE=${RESAMPLE})`);
+    log(RESAMPLE === "crop"
+        ? "   → 未縮放，交給 iOS 縮小（只經過一次重採樣）"
+        : "   → 已縮到 widget 像素（DrawContext 重採樣）");
     fm.remove(probe);
   }
   if (RENDER_MODE === "background") {
