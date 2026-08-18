@@ -1,85 +1,73 @@
-// ─────────────────────────────────────────────
-// 每日智慧小語 Widget v11
+// ═══════════════════════════════════════════════════════════
+//  每日智慧小語 · Scriptable Widget  v1.0
+//  https://github.com/wyattsheu/wisdom-assets
 //
-// v7 相對 v6 的兩個關鍵修正：
-//  1. 用 DrawContext 以「裝置實際像素」渲染，讓 WidgetKit 不必再縮放
-//     （v6 直接把原圖丟給 backgroundImage，iOS 會再縮一次 + 快照壓縮 → 糊）
-//  2. 加入 CACHE_VERSION，改版時自動清掉舊快取
-//     （v6 的今日快取會讓舊的模糊圖沿用一整天）
-//
-// 素材為 1320x1840，遠大於 widget 需求 → 全程是「縮小」，不會失真。
-// ─────────────────────────────────────────────
+//  用法：整段複製 → Scriptable 新增腳本 → 貼上 → 命名為「智慧小語」
+//        桌面長按 → ➕ → Scriptable → Large → 編輯小工具 → 選此腳本
+// ═══════════════════════════════════════════════════════════
 
 const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
-const CACHE_VERSION = 15;         // 改這個數字會強制清快取
-const DEBUG = true;               // 在 Scriptable 內執行時印出診斷資訊
-const FILL_MODE = "fill";         // "fill" = 填滿並裁掉上下（預設，畫面飽滿）
-                                  // "fit"  = 完整顯示整張卡片，四周留底色
 
-// 渲染路徑：
-//   "background" = 鋪滿整個 widget 外框（預設）
-//   "image"      = widget.addImage()，會受 iOS 17+ 內容邊界限制 → 四周出現黑邊
-const RENDER_MODE = "background";
+// ── 可調整的設定 ────────────────────────────────────────────
 
-// 縮放策略 —— 這是目前畫質的最後一個變因
-//   "crop"  DrawContext 只裁切、完全不縮放（1:1 取出原始像素），
-//           縮放交給 iOS 自己做。全程只經過「一次」重採樣。（預設）
-//   "scale" 我們自己用 DrawContext 縮到 widget 像素，iOS 再貼上。
-//           理論上 1:1，但等於用 DrawContext 的重採樣品質取代 iOS 的。
-// 兩種都試試看哪個在你的機型上比較清楚。
-const RESAMPLE = "crop";
-
-// 過取樣倍率。1 = 剛好等於螢幕像素。widget 有記憶體上限，別調太高。
-const OVERSAMPLE = 1;
-
-// 取景（決定文字看起來多大，這是「桌面上清不清楚」的關鍵）
-//   預設 1.0 / 0.5 = 等比填滿並置中（與 v10 相同，實測最耐看）
-//   ZOOM    想讓文字更大可調 1.2~1.5，代價是裁掉更多卡片內容
-//   FOCUS_Y 垂直對焦 0=最上 0.5=正中 1=最下
+// 取景倍率：1.0 = 完整填滿；調大會裁掉更多卡片留白、讓文字變大
+// 覺得文字太小不好讀就往上調（建議 1.15 ~ 1.5）
 const ZOOM = 1.15;
+
+// 垂直對焦位置：0 = 對齊頂部，0.5 = 置中，1 = 對齊底部
 const FOCUS_Y = 0.5;
 
-// 在小工具上直接印出實際解析度（widget 執行時看不到 console，只能畫在圖上）
-// 確認畫質正常後改成 false 即可移除。
-const SHOW_OVERLAY = false;
+// 改這個數字會強制清除本機快取（換版本或想重抓時用）
+const CACHE_VERSION = 15;
+
+// 在 Scriptable App 內執行時印出診斷資訊（不影響桌面小工具）
+const DEBUG = false;
+
+// ── 以下不需要修改 ──────────────────────────────────────────
+
+const CARD_BG = "#f7f4ef";        // 卡片底色，用於填補任何縫隙
 
 const fm = FileManager.local();
 const dir = fm.joinPath(fm.documentsDirectory(), "wisdom");
 if (!fm.fileExists(dir)) fm.createDirectory(dir);
 const manPath  = fm.joinPath(dir, "manifest.json");
 const metaPath = fm.joinPath(dir, "meta.json");
-const imgPath  = fm.joinPath(dir, "today.png");
-const lastPath = fm.joinPath(dir, "last.png");
+const imgPath  = fm.joinPath(dir, "today.webp");
+const lastPath = fm.joinPath(dir, "last.webp");
 
 const d = new Date();
 const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-function log(...a) { if (DEBUG) console.log(...a); }
+const log = (...a) => { if (DEBUG) console.log(...a); };
 
-// ── 版本升級 → 清掉所有舊快取（含 v6 留下的 .webp）────────
+// 版本升級時清掉舊快取，避免沿用到舊格式或舊畫質的圖
 let meta = {};
-if (fm.fileExists(metaPath)) { try { meta = JSON.parse(fm.readString(metaPath)); } catch (e) {} }
+if (fm.fileExists(metaPath)) {
+  try { meta = JSON.parse(fm.readString(metaPath)); } catch (e) {}
+}
 if (meta.v !== CACHE_VERSION) {
-  log(`🧹 快取版本 ${meta.v || "無"} → ${CACHE_VERSION}，清除舊快取`);
-  for (const f of ["manifest.json", "meta.json", "today.png", "last.png", "today.webp", "last.webp"]) {
+  log(`清除舊快取（v${meta.v || "?"} → v${CACHE_VERSION}）`);
+  for (const f of ["manifest.json", "meta.json", "today.webp", "last.webp",
+                   "today.png", "last.png"]) {
     const p = fm.joinPath(dir, f);
     if (fm.fileExists(p)) fm.remove(p);
   }
   meta = {};
 }
 
-// ⚠️ 關鍵：Request.loadImage() 在 widget 環境會被砍到最大 500x500px，
-//    在 App 內卻是完整解析度 —— 這就是「App 內清晰、桌面糊」的真正原因。
-//    繞法：一律以原始位元組 (Data) 下載／讀檔，再用 Image.fromData() 還原，
-//    完全不碰 loadImage() / readImage()。
-async function get(url, kind) {
+/**
+ * ⚠️ 重要：Request.loadImage() 在「小工具環境」會被 Scriptable 限制在
+ *    最大 500x500px，但在 App 內執行卻是完整解析度。這正是許多人遇到
+ *    「App 內清楚、桌面模糊」的原因。
+ *    解法：全程以原始位元組 (Data) 下載與讀檔，再用 Image.fromData()
+ *    還原，完全不碰 loadImage() / readImage()。
+ */
+async function loadData(url) {
   for (let i = 0; i < 3; i++) {
     try {
       const r = new Request(url);
       r.timeoutInterval = 12;
-      if (kind === "image") return Image.fromData(await r.load());   // 不用 loadImage
-      if (kind === "json")  return await r.loadJSON();
-      return await r.loadString();
+      return await r.load();
     } catch (e) {
       if (i === 2) throw e;
       await new Promise(res => Timer.schedule(900, false, res));
@@ -87,20 +75,32 @@ async function get(url, kind) {
   }
 }
 
-/** 以原始位元組讀檔還原圖片，避開 readImage() 可能的降階 */
-function readImageRaw(path) {
-  return Image.fromData(Data.fromFile(path));
+async function loadJSON(url) {
+  for (let i = 0; i < 3; i++) {
+    try {
+      const r = new Request(url);
+      r.timeoutInterval = 12;
+      return await r.loadJSON();
+    } catch (e) {
+      if (i === 2) throw e;
+      await new Promise(res => Timer.schedule(900, false, res));
+    }
+  }
 }
 
-// ── widget 實際點數尺寸（依機型與家族）────────────────────
-//  重要：Large widget 不是正方形！它的「寬度與 Medium 相同」，只有高度較高。
-//  例：390pt 螢幕 → small 158x158 / medium 338x158 / large 338x354
-//  若這裡算錯，iOS 會為了塞進實際尺寸再縮放一次 → 桌面上就糊掉。
+const readImageRaw = (path) => Image.fromData(Data.fromFile(path));
+
+/**
+ * 小工具的實際點數尺寸。
+ * 注意：Large 不是正方形！它的寬度與 Medium 相同，只有高度較高。
+ * 例：390pt 螢幕 → small 158x158 / medium 338x158 / large 338x354
+ * 這裡若算錯，iOS 會為了塞進實際尺寸再縮放一次，畫面就會糊掉。
+ */
 function widgetPointSize() {
   const family = config.widgetFamily || "large";
   const scr = Device.screenSize();
   const w = Math.min(scr.width, scr.height);
-  let sq, wide, tall;                       // sq=小方形邊長, wide=中/大寬度, tall=大高度
+  let sq, wide, tall;
   if (w >= 428)      { sq = 170; wide = 364; tall = 382; }
   else if (w >= 414) { sq = 169; wide = 360; tall = 379; }
   else if (w >= 390) { sq = 158; wide = 338; tall = 354; }
@@ -108,29 +108,24 @@ function widgetPointSize() {
   else               { sq = 141; wide = 292; tall = 311; }
   if (family === "small")  return new Size(sq,   sq);
   if (family === "medium") return new Size(wide, sq);
-  return new Size(wide, tall);              // large / extraLarge
+  return new Size(wide, tall);
 }
 
-// ── 直接以「像素」建立畫布，不依賴 respectScreenScale ──────
-//  Scriptable 的 Image.size 單位不一致（載入的圖回報像素、DrawContext
-//  產生的回報點數），所以不要靠它推論。這裡直接把畫布開成目標像素數，
-//  產出的圖必然是 1014x1062 這種實際解析度，iOS 放進 338x354pt@3x 剛好 1:1。
 /**
- * 只裁切、不縮放：以「原始像素」取出要顯示的區域，縮放交給 iOS。
- * 這樣整條路徑只經過一次重採樣（iOS 那次），而不是我們縮一次、iOS 再處理一次。
+ * 只裁切、不縮放：以原始像素取出要顯示的區域，縮放交給 iOS。
+ * 這樣整條路徑只經過一次重採樣，而不是我們縮一次、iOS 再處理一次。
  */
-function renderCropOnly(src, box) {
+function cropToWidget(src, box) {
   const sw = src.size.width, sh = src.size.height;
-  const targetAspect = box.width / box.height;
+  const aspect = box.width / box.height;
 
-  // 先算出「填滿 widget 後實際看得到的來源區域」有多大（以來源像素為單位）
   let cropW, cropH;
-  if (sw / sh > targetAspect) {
+  if (sw / sh > aspect) {
     cropH = sh / ZOOM;
-    cropW = cropH * targetAspect;
+    cropW = cropH * aspect;
   } else {
     cropW = sw / ZOOM;
-    cropH = cropW / targetAspect;
+    cropH = cropW / aspect;
   }
   cropW = Math.min(Math.round(cropW), sw);
   cropH = Math.min(Math.round(cropH), sh);
@@ -139,70 +134,41 @@ function renderCropOnly(src, box) {
   ctx.size = new Size(cropW, cropH);
   ctx.respectScreenScale = false;
   ctx.opaque = true;
+  ctx.setFillColor(new Color(CARD_BG));
+  ctx.fillRect(new Rect(0, 0, cropW, cropH));
 
-  // 把原圖以 1:1 原尺寸畫進去，只是位移到想要的裁切位置 → 沒有任何縮放
-  const dx = -(sw - cropW) / 2;
-  const dy = -((sh - cropH) * FOCUS_Y);
-  ctx.drawImageInRect(src, new Rect(dx, dy, sw, sh));
+  // 以 1:1 原尺寸畫入，只做位移 → 完全沒有縮放
+  ctx.drawImageInRect(src, new Rect(
+    -(sw - cropW) / 2,
+    -(sh - cropH) * FOCUS_Y,
+    sw, sh
+  ));
   return ctx.getImage();
 }
 
-function renderExact(src, box, scaleFactor) {
-  const pw = Math.round(box.width * scaleFactor * OVERSAMPLE);
-  const ph = Math.round(box.height * scaleFactor * OVERSAMPLE);
-
-  const ctx = new DrawContext();
-  ctx.size = new Size(pw, ph);
-  ctx.respectScreenScale = false;   // 自己算像素，不讓它再乘一次
-  ctx.opaque = true;
-  ctx.setFillColor(new Color("#f7f4ef"));
-  ctx.fillRect(new Rect(0, 0, pw, ph));
-
-  const sw = src.size.width, sh = src.size.height;
-  const base = FILL_MODE === "fit"
-    ? Math.min(pw / sw, ph / sh)      // 完整顯示
-    : Math.max(pw / sw, ph / sh);     // 填滿裁切
-  const scale = base * (FILL_MODE === "fit" ? 1 : ZOOM);
-  const dw = sw * scale, dh = sh * scale;
-
-  // 水平置中；垂直依 FOCUS_Y 對焦，並夾住避免露出畫布外的底色
-  const dx = (pw - dw) / 2;
-  let dy = (ph / 2) - (dh * FOCUS_Y);
-  if (dh >= ph) dy = Math.min(0, Math.max(ph - dh, dy));
-  else dy = (ph - dh) / 2;
-
-  ctx.drawImageInRect(src, new Rect(dx, dy, dw, dh));
-
-  // widget 執行時看不到 console，把實際解析度直接畫在圖上（暫時保留）
-  if (SHOW_OVERLAY) {
-    const label = `src ${sw}x${sh} → out ${pw}x${ph}`;
-    ctx.setFillColor(new Color("#000000", 0.65));
-    ctx.fillRect(new Rect(0, ph - 34, pw, 34));
-    ctx.setTextColor(Color.white());
-    ctx.setFont(Font.mediumSystemFont(20));
-    ctx.drawText(label, new Point(10, ph - 29));
-  }
-  return ctx.getImage();
-}
+// ── 主流程 ──────────────────────────────────────────────────
 
 const widget = new ListWidget();
 widget.setPadding(0, 0, 0, 0);
-widget.backgroundColor = new Color("#f7f4ef");   // 縫隙用卡片底色，不要露出黑底
+widget.backgroundColor = new Color(CARD_BG);
+
 let image = null, offline = false;
 
 try {
   if (meta.date === today && fm.fileExists(imgPath)) {
-    image = readImageRaw(imgPath);
-    log(`📦 使用今日快取：${meta.title || ""}`);
+    image = readImageRaw(imgPath);              // 今天抽過了，零連線
+    log(`使用今日快取：${meta.title || ""}`);
   } else {
+    // manifest 一週抓一次即可
     let man = null;
-    const manAge = fm.fileExists(manPath)
-      ? (Date.now() - fm.modificationDate(manPath).getTime()) : Infinity;
-    if (manAge < 7 * 86400000) {
+    const age = fm.fileExists(manPath)
+      ? (Date.now() - fm.modificationDate(manPath).getTime())
+      : Infinity;
+    if (age < 7 * 86400000) {
       man = JSON.parse(fm.readString(manPath));
     } else {
       try {
-        man = await get(MANIFEST, "json");
+        man = await loadJSON(MANIFEST);
         fm.writeString(manPath, JSON.stringify(man));
       } catch (e) {
         if (fm.fileExists(manPath)) man = JSON.parse(fm.readString(manPath));
@@ -214,63 +180,29 @@ try {
     if (!items.length) throw new Error("manifest 是空的");
     const pick = items[Math.floor(Math.random() * items.length)];
 
-    // 存「原始 webp 位元組」而不是用 writeImage()（那會重新編碼，且可能已降階）
-    const raw = await (async () => {
-      for (let i = 0; i < 3; i++) {
-        try {
-          const r = new Request(man.base + pick.id + ".webp");
-          r.timeoutInterval = 12;
-          return await r.load();
-        } catch (e) {
-          if (i === 2) throw e;
-          await new Promise(res => Timer.schedule(900, false, res));
-        }
-      }
-    })();
+    // 存原始 webp 位元組，不用 writeImage()（那會重新編碼一次）
+    const raw = await loadData(man.base + pick.id + ".webp");
     fm.write(imgPath, raw);
     fm.write(lastPath, raw);
     image = Image.fromData(raw);
-    fm.writeString(metaPath, JSON.stringify({ v: CACHE_VERSION, date: today, id: pick.id, title: pick.title }));
-    log(`⬇️  下載：${pick.title}`);
+    fm.writeString(metaPath, JSON.stringify({
+      v: CACHE_VERSION, date: today, id: pick.id, title: pick.title
+    }));
+    log(`下載：${pick.title}`);
   }
 } catch (err) {
   console.error(err);
-  if (fm.fileExists(lastPath)) { image = readImageRaw(lastPath); offline = true; }
+  if (fm.fileExists(lastPath)) {                // 離線就沿用上一張
+    image = readImageRaw(lastPath);
+    offline = true;
+  }
 }
 
 if (image) {
   const box = widgetPointSize();
-  const scaleFactor = Device.screenScale();
-  log(`📐 原圖 ${image.size.width}x${image.size.height}`);
-  log(`📱 widget ${box.width}x${box.height} pt @${scaleFactor}x = ${box.width * scaleFactor}x${box.height * scaleFactor} px`);
-  log(image.size.width >= box.width * scaleFactor
-      ? "✅ 來源大於需求 → 縮小顯示（清晰）"
-      : "⚠️ 來源小於需求 → 會被放大（模糊）");
-
-  const rendered = RESAMPLE === "crop"
-    ? renderCropOnly(image, box)                    // 只裁切，縮放交給 iOS
-    : renderExact(image, box, scaleFactor);         // 自己縮到 widget 像素
-
-  if (DEBUG) {
-    const probe = fm.joinPath(dir, "_probe.png");
-    fm.writeImage(probe, rendered);
-    const back = fm.readImage(probe);
-    log(`🖼  輸出 ${back.size.width}x${back.size.height} px  (RESAMPLE=${RESAMPLE})`);
-    log(RESAMPLE === "crop"
-        ? "   → 未縮放，交給 iOS 縮小（只經過一次重採樣）"
-        : "   → 已縮到 widget 像素（DrawContext 重採樣）");
-    fm.remove(probe);
-  }
-  if (RENDER_MODE === "background") {
-    widget.backgroundImage = rendered;
-  } else {
-    // addImage 路徑：imageSize 要用「點數」，圖本身是高解析度 → 顯示時 1:1
-    const wi = widget.addImage(rendered);
-    wi.imageSize = new Size(box.width, box.height);
-    wi.applyFillingContentMode();
-    wi.centerAlignImage();
-  }
-  log(`🎨 渲染路徑 = ${RENDER_MODE}，過取樣 = ${OVERSAMPLE}x`);
+  log(`原圖 ${image.size.width}x${image.size.height}`);
+  log(`widget ${box.width}x${box.height} pt @${Device.screenScale()}x`);
+  widget.backgroundImage = cropToWidget(image, box);
 } else {
   widget.backgroundColor = new Color("#1c1c1e");
   const t = widget.addText("暫時連不上網路 🌙");
@@ -278,6 +210,7 @@ if (image) {
   t.centerAlignText();
 }
 
+// 正常情況每天凌晨換一張；離線或失敗則 30 分鐘後再試
 const next = new Date();
 if (offline || !image) next.setMinutes(next.getMinutes() + 30);
 else { next.setDate(next.getDate() + 1); next.setHours(0, 5, 0, 0); }
