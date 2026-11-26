@@ -111,6 +111,10 @@ App Store 搜尋 **Scriptable**（作者 Simon Støvring，圖示是黑底白色
 - iOS：點一下小工具強制重新執行
 - Android：移除小工具後重新加入
 
+**iOS 小工具整塊是黑的，但點開 Scriptable 看得到圖**
+- 這是舊版（v1.0）的問題：圖片超過 iOS 小工具的尺寸上限
+- 重新複製最新的 [widget.js](widget.js) 貼上覆蓋舊腳本，再長按小工具 →「編輯小工具」→ 完成，讓它重跑
+
 **iOS 找不到 Scriptable 小工具**
 - 確認 Scriptable App 已安裝，且**至少打開過一次**
 
@@ -199,5 +203,5 @@ Scriptable 在 widget 環境（非 App 內）會把 `loadImage()` 載入的圖�
 
 - **Large widget 不是正方形**：寬度與 Medium 相同、只有高度較高（390pt 螢幕為 `338×354`）。若當成正方形計算，iOS 會再縮放一次而糊掉。
 - **`addImage()` 會受 iOS 17+ 內容邊界限制**，四周露出底色（深色模式下為黑邊）；改用 `backgroundImage` 才能真正滿版。
-- **只裁切、不縮放**：`DrawContext` 僅負責裁切（1:1 取出區域），縮放交給 iOS，讓整條路徑只經過一次重採樣。
+- **圖片不能比小工具大**：WidgetKit 對小工具圖片有像素面積上限（約等於小工具本身的像素數），超過就**整塊變黑**，但 App 內預覽正常。v1.0 曾「只裁切、不縮放」把縮放交給 iOS，輸出約 1148×1202、超過 Large 的 1014×1062 而黑屏；v1.1 改為用 `DrawContext` 縮到小工具實際像素，並夾在上限以內。
 - **`Image.size` 單位不一致**：檔案載入的圖回報「像素」，`DrawContext` 產生的回報「點數」，不可混用推論。
