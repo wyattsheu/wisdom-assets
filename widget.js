@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════
-//  每日智慧小語 · Scriptable Widget  v1.0
+//  每日智慧小語 · Scriptable Widget  v1.1
+//  v1.1：修正桌面小工具顯示全黑（圖片超過 WidgetKit 像素上限）
 //  https://github.com/wyattsheu/wisdom-assets
 //
 //  用法：整段複製 → Scriptable 新增腳本 → 貼上 → 命名為「智慧小語」
@@ -112,37 +113,43 @@ function widgetPointSize() {
 }
 
 /**
- * 只裁切、不縮放：以原始像素取出要顯示的區域，縮放交給 iOS。
- * 這樣整條路徑只經過一次重採樣，而不是我們縮一次、iOS 再處理一次。
+ * 裁切並縮放到「小工具的實際像素」。
+ *
+ * ⚠️ WidgetKit 對小工具圖片有像素面積上限（約等於小工具本身的像素數），
+ *    超過就整塊變黑（App 內預覽卻正常）。v1.0 只裁切不縮放，輸出約
+ *    1148x1202，比 Large 的 1014x1062 大 → 桌面黑屏。
+ *    所以這裡一定要自己縮到 widget 像素，並夾在上限以內。
  */
-function cropToWidget(src, box) {
-  const sw = src.size.width, sh = src.size.height;
-  const aspect = box.width / box.height;
+function renderToWidget(src, box) {
+  const scale = Device.screenScale();
+  let pw = Math.round(box.width * scale);
+  let ph = Math.round(box.height * scale);
 
-  let cropW, cropH;
-  if (sw / sh > aspect) {
-    cropH = sh / ZOOM;
-    cropW = cropH * aspect;
-  } else {
-    cropW = sw / ZOOM;
-    cropH = cropW / aspect;
+  // 保險：輸出面積不超過 widget 像素面積的 98%
+  const limit = box.width * scale * box.height * scale * 0.98;
+  if (pw * ph > limit) {
+    const k = Math.sqrt(limit / (pw * ph));
+    pw = Math.floor(pw * k);
+    ph = Math.floor(ph * k);
   }
-  cropW = Math.min(Math.round(cropW), sw);
-  cropH = Math.min(Math.round(cropH), sh);
 
   const ctx = new DrawContext();
-  ctx.size = new Size(cropW, cropH);
+  ctx.size = new Size(pw, ph);
   ctx.respectScreenScale = false;
   ctx.opaque = true;
   ctx.setFillColor(new Color(CARD_BG));
-  ctx.fillRect(new Rect(0, 0, cropW, cropH));
+  ctx.fillRect(new Rect(0, 0, pw, ph));
 
-  // 以 1:1 原尺寸畫入，只做位移 → 完全沒有縮放
+  // 等比填滿 × ZOOM；水平置中，垂直依 FOCUS_Y 對焦
+  const sw = src.size.width, sh = src.size.height;
+  const k = Math.max(pw / sw, ph / sh) * ZOOM;
+  const dw = sw * k, dh = sh * k;
   ctx.drawImageInRect(src, new Rect(
-    -(sw - cropW) / 2,
-    -(sh - cropH) * FOCUS_Y,
-    sw, sh
+    (pw - dw) / 2,
+    -(dh - ph) * FOCUS_Y,
+    dw, dh
   ));
+  log(`輸出 ${pw}x${ph} px`);
   return ctx.getImage();
 }
 
@@ -202,7 +209,7 @@ if (image) {
   const box = widgetPointSize();
   log(`原圖 ${image.size.width}x${image.size.height}`);
   log(`widget ${box.width}x${box.height} pt @${Device.screenScale()}x`);
-  widget.backgroundImage = cropToWidget(image, box);
+  widget.backgroundImage = renderToWidget(image, box);
 } else {
   widget.backgroundColor = new Color("#1c1c1e");
   const t = widget.addText("暫時連不上網路 🌙");
