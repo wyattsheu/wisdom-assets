@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════
-//  每日智慧小語 · Scriptable Widget  v1.1
+//  每日智慧小語 · Scriptable Widget  v1.2
+//  v1.2：垂直取景調整（FOCUS_Y 0.5 → 0.4），卡片文字位置較舒服
 //  v1.1：修正桌面小工具顯示全黑（圖片超過 WidgetKit 像素上限）
 //  https://github.com/wyattsheu/wisdom-assets
 //
@@ -16,7 +17,7 @@ const MANIFEST = "https://wyattsheu.github.io/wisdom-assets/manifest.json";
 const ZOOM = 1.15;
 
 // 垂直對焦位置：0 = 對齊頂部，0.5 = 置中，1 = 對齊底部
-const FOCUS_Y = 0.5;
+const FOCUS_Y = 0.4;
 
 // 改這個數字會強制清除本機快取（換版本或想重抓時用）
 const CACHE_VERSION = 15;
